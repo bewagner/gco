@@ -1,3 +1,0 @@
-[submodule "src/libgit2cpp"]
-	path = src/libgit2cpp
-	url = https://github.com/AndreyG/libgit2cpp/
