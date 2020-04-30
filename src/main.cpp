@@ -2,12 +2,59 @@
 #include <experimental/filesystem>
 #include <memory>
 #include "args.hxx"
-//#include "git2.h"
-//#include "git2/repository.h"
-
+#include "git2cpp/repo.h"
+#include "git2cpp/initializer.h"
+#include "git2cpp/annotated_commit.h"
+#include <git2/errors.h>
 
 namespace fs = std::experimental::filesystem;
+void perform_checkout_ref(git::Repository & repo, git::AnnotatedCommit const & target)
+{
+    git_checkout_options checkout_opts = GIT_CHECKOUT_OPTIONS_INIT;
 
+    /** Setup our checkout options from the parsed options */
+    checkout_opts.checkout_strategy = GIT_CHECKOUT_SAFE;
+
+
+    /** Grab the commit we're interested to move to */
+    auto target_commit = repo.commit_lookup(target.commit_id());
+    /**
+     * Perform the checkout so the workdir corresponds to what target_commit
+     * contains.
+     *
+     * Note that it's okay to pass a git_commit here, because it will be
+     * peeled to a tree.
+     */
+    if (repo.checkout_tree(target_commit, checkout_opts))
+    {
+        fprintf(stderr, "failed to checkout tree: %s\n", git_error_last()->message);
+        return;
+    }
+
+    /**
+     * Now that the checkout has completed, we have to update HEAD.
+     *
+     * Depending on the "origin" of target (ie. it's an OID or a branch name),
+     * we might need to detach HEAD.
+     */
+    int err;
+    if (auto ref = target.commit_ref()) {
+        err = repo.set_head(ref);
+    } else {
+        err = repo.set_head_detached(target);
+    }
+    if (err != 0) {
+        fprintf(stderr, "failed to update HEAD reference: %s\n", git_error_last()->message);
+    }
+}
+git::AnnotatedCommit resolve_refish(git::Repository const & repo, const char *refish)
+{
+    if (auto ref = repo.dwim(refish))
+        return repo.annotated_commit_from_ref(ref);
+
+    auto obj = repo.revparse_single(refish);
+    return repo.annotated_commit_lookup(obj.single()->id());
+}
 int main(int argc, char **argv) {
     args::ArgumentParser parser("This is a test program.", "This goes after the options.");
     args::HelpFlag help(parser, "help", "Display this help menu", {'h', "help"});
@@ -38,28 +85,11 @@ int main(int argc, char **argv) {
     if (numbers) { for (const auto nm: args::get(numbers)) { std::cout << "n: " << nm << std::endl; }}
 
 
-//    git_libgit2_init();
-//
-//    git_object *treeish = nullptr;
-//    git_checkout_options opts = GIT_CHECKOUT_OPTIONS_INIT;
-//
-//    opts.checkout_strategy = GIT_CHECKOUT_SAFE;
-//    git_repository *repo = nullptr;
-//    if(git_repository_open_ext(&repo, fs::current_path().c_str(), GIT_REPOSITORY_OPEN_FROM_ENV,nullptr) < 1) {
-//
-//        fprintf(stderr, "Could not open repository: %s\n", git_error_last()->message);
-//        exit(1);
-//    }
-//    std::cout << std::string(repo->workdir) << std::endl;
-//
-//    git_revparse_single(&treeish, repo, "master");
-//    git_checkout_tree(repo, treeish, &opts);
-//    git_checkout_head(repo,&opts);
-//
-//    git_repository_set_head(repo, "refs/heads/master");
-//
-//    git_object_free(treeish);
-//    git_libgit2_shutdown();
+    auto_git_initializer;
+    git::Repository repo(fs::current_path().c_str());
+    auto checkout_target = resolve_refish(repo, "master");
+
+    perform_checkout_ref(repo, checkout_target);
 
 
     return 0;
