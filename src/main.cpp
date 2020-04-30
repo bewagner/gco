@@ -13,6 +13,7 @@
 #include "boost/filesystem.hpp"
 #include "doctest/doctest.h"
 
+
 void perform_checkout_ref(git::Repository &repo, git::AnnotatedCommit const &target) {
     git_checkout_options checkout_opts = GIT_CHECKOUT_OPTIONS_INIT;
 
@@ -78,26 +79,53 @@ void print_usage() {
 
 std::optional<std::string>
 find_matching_branch(const std::string &input, const std::vector<std::string> &branch_names) {
+    constexpr const int MIN_MATCHING_SCORE = 50;
     if (input.empty()) {
         return std::nullopt;
     }
 
+    struct FuzzyResult {
+        std::string &name;
+        int score;
+    };
+    const std::string &empty = "";
+    FuzzyResult best_match{const_cast<std::string &>(empty), 0};
 
-    for (const auto &branch_name : branch_names) {
-        if (branch_name.find(input) != std::string::npos) {
-            return branch_name;
+    for (const std::string &branch_name : branch_names) {
+        int score;
+        bool pattern_found = fts::fuzzy_match(input.c_str(), branch_name.c_str(), score);
+        if (!pattern_found) {
+            continue;
+        }
+
+        if (score > best_match.score) {
+            best_match.score = score;
+            best_match.name = branch_name;
         }
     }
 
-    return std::nullopt;
+    if (best_match.score < MIN_MATCHING_SCORE) {
+        return std::nullopt;
+    }
+    return best_match.name;
+
 }
 
 TEST_CASE ("find_matching_branch") {
-    std::vector<std::string> branch_names = {"ab123", "123", "abc45"};
-            CHECK(find_matching_branch("123", branch_names).value() == "ab123");
-            CHECK(!find_matching_branch("", branch_names).has_value());
-            CHECK(!find_matching_branch("def", branch_names).has_value());
-            CHECK(find_matching_branch("abc", branch_names).value() == "abc45");
+            SUBCASE("test matching") {
+        std::vector<std::string> branch_names = {"ab123", "123", "abc45"};
+                CHECK(find_matching_branch("123", branch_names).value() == "123");
+                CHECK(!find_matching_branch("", branch_names).has_value());
+                CHECK(!find_matching_branch("def", branch_names).has_value());
+                CHECK(find_matching_branch("abc", branch_names).value() == "abc45");
+    }
+            SUBCASE("test fuzzyness") {
+        std::vector<std::string> branch_names = {"master", "masterabc", "abcmaster"};
+                CHECK(find_matching_branch("ma", branch_names).value() == "master");
+                CHECK(find_matching_branch("mac", branch_names).value() == "masterabc");
+                CHECK(find_matching_branch("cr", branch_names).value() == "abcmaster");
+    }
+
 }
 
 struct PartitionedBranchNames {
@@ -124,6 +152,10 @@ PartitionedBranchNames extract_branch_names_from(const git::Repository &repo) {
 }
 
 
+void git_fetch() {
+
+}
+
 int main(int argc, char **argv) {
 
     doctest::Context context;
@@ -136,7 +168,7 @@ int main(int argc, char **argv) {
     if (argc != 2) {
         return 1;
     }
-    std::unordered_map<std::string, std::string> commands = {
+    const std::unordered_map<std::string, std::string> commands = {
             {"m",      "master"},
             {"master", "master"},
             {"d",      "devel"},
@@ -148,31 +180,40 @@ int main(int argc, char **argv) {
 
 
     if (commands.find(input) != commands.end()) {
-        branch_name = commands[input];
+        branch_name = commands.at(input);
     }
 
-    if (!contains_only_digits(input)) {
-        print_usage();
-        return 1;
-    }
 
     branch_name = input;
 
 
-//    auto_git_initializer;
-//    git::Repository repo(boost::filesystem::current_path().c_str());
-//    const auto[remote_branch_names, local_branch_names] = extract_branch_names_from(repo);
-//
-//    auto matching_local_branch = find_matching_branch(branch_name, local_branch_names);
-//    if(!matching_local_branch)
+    auto_git_initializer;
+    git::Repository repo(boost::filesystem::current_path().c_str());
+    const auto[remote_branch_names, local_branch_names] = extract_branch_names_from(repo);
+
+    const auto matching_local_branch = find_matching_branch(branch_name, local_branch_names);
+    const auto matching_remote_branch = find_matching_branch(branch_name, remote_branch_names);
 
 
+    if (!matching_local_branch && !matching_remote_branch) {
+        std::cout << "Your input '" << branch_name << "' did not match any branch names.\nAvailable branches are:\n";
+        for (const auto &branch : repo.branches(git::branch_type::LOCAL)) {
+            // TODO beautify name
+            std::cout << branch.name() << "\n";
+        }
+        return 1;
+    }
+
+    if (!matching_local_branch && matching_remote_branch) {
+        git_fetch();
+    }
+    std::cout << "input " << branch_name << std::endl;
+    std::cout << "local branch " << matching_local_branch.value_or("") << std::endl;
+    std::cout << "remote branch " << matching_remote_branch.value_or("") << std::endl;
 
 
-
-
-//    auto checkout_target = resolve_refish(repo, branch_name.c_str());
-//    perform_checkout_ref(repo, checkout_target);
+    auto checkout_target = resolve_refish(repo, matching_local_branch.value_or("master").c_str());
+    perform_checkout_ref(repo, checkout_target);
 
 
     return res;
