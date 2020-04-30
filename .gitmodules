@@ -1,0 +1,6 @@
+[submodule "src/args"]
+	path = src/args
+	url = https://github.com/Taywee/args
+[submodule "src/libgit2cpp"]
+	path = src/libgit2cpp
+	url = https://github.com/AndreyG/libgit2cpp/
