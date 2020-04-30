@@ -1,15 +1,16 @@
 #include <iostream>
-#include <experimental/filesystem>
 #include <memory>
-#include "args.hxx"
+#include <unordered_map>
 #include "git2cpp/repo.h"
 #include "git2cpp/initializer.h"
 #include "git2cpp/annotated_commit.h"
 #include <git2/errors.h>
+#include <optional>
+#include <regex>
+#include <boost/filesystem.hpp>
 
-namespace fs = std::experimental::filesystem;
-void perform_checkout_ref(git::Repository & repo, git::AnnotatedCommit const & target)
-{
+
+void perform_checkout_ref(git::Repository &repo, git::AnnotatedCommit const &target) {
     git_checkout_options checkout_opts = GIT_CHECKOUT_OPTIONS_INIT;
 
     /** Setup our checkout options from the parsed options */
@@ -25,8 +26,7 @@ void perform_checkout_ref(git::Repository & repo, git::AnnotatedCommit const & t
      * Note that it's okay to pass a git_commit here, because it will be
      * peeled to a tree.
      */
-    if (repo.checkout_tree(target_commit, checkout_opts))
-    {
+    if (repo.checkout_tree(target_commit, checkout_opts)) {
         fprintf(stderr, "failed to checkout tree: %s\n", git_error_last()->message);
         return;
     }
@@ -47,49 +47,102 @@ void perform_checkout_ref(git::Repository & repo, git::AnnotatedCommit const & t
         fprintf(stderr, "failed to update HEAD reference: %s\n", git_error_last()->message);
     }
 }
-git::AnnotatedCommit resolve_refish(git::Repository const & repo, const char *refish)
-{
-    if (auto ref = repo.dwim(refish))
+
+git::AnnotatedCommit resolve_refish(git::Repository const &repo, const char *refish) {
+    if (auto ref = repo.dwim(refish)) {
         return repo.annotated_commit_from_ref(ref);
+    }
 
     auto obj = repo.revparse_single(refish);
     return repo.annotated_commit_lookup(obj.single()->id());
 }
+
+bool contains_only_digits(const std::string &input) {
+    return std::all_of(input.begin(), input.end(), isdigit);
+}
+
+void print_usage() {
+// TODO
+}
+
+std::optional<std::string>
+find_matching_branch(const std::string &input, const std::vector<std::string> &branch_names) {
+
+
+    for (const auto &branch_name : branch_names) {
+        if (branch_name.find(input) != std::string::npos) {
+            return branch_name;
+        }
+    }
+
+    return std::nullopt;
+}
+
 int main(int argc, char **argv) {
-    args::ArgumentParser parser("This is a test program.", "This goes after the options.");
-    args::HelpFlag help(parser, "help", "Display this help menu", {'h', "help"});
-    args::ValueFlag<int> integer(parser, "integer", "The integer flag", {'i'});
-    args::ValueFlagList<char> characters(parser, "characters", "The character flag", {'c'});
-    args::Positional<std::string> foo(parser, "foo", "The foo position");
-    args::PositionalList<double> numbers(parser, "numbers", "The numbers position list");
-    try {
-        parser.ParseCLI(argc, argv);
-    }
-    catch (const args::Help &) {
-        std::cout << parser;
-        return 0;
-    }
-    catch (const args::ParseError &e) {
-        std::cerr << e.what() << std::endl;
-        std::cerr << parser;
+
+    if (argc != 2) {
         return 1;
     }
-    catch (const args::ValidationError &e) {
-        std::cerr << e.what() << std::endl;
-        std::cerr << parser;
+    std::unordered_map<std::string, std::string> commands = {
+            {"m",      "master"},
+            {"master", "master"},
+            {"d",      "devel"},
+            {"devel",  "devel"}
+    };
+
+    std::string input(argv[1]);
+    std::string branch_name;
+
+
+    if (commands.find(input) != commands.end()) {
+        branch_name = commands[input];
+    }
+
+    if (!contains_only_digits(input)) {
+        print_usage();
         return 1;
     }
-    if (integer) { std::cout << "i: " << args::get(integer) << std::endl; }
-    if (characters) { for (const auto ch: args::get(characters)) { std::cout << "c: " << ch << std::endl; }}
-    if (foo) { std::cout << "f: " << args::get(foo) << std::endl; }
-    if (numbers) { for (const auto nm: args::get(numbers)) { std::cout << "n: " << nm << std::endl; }}
+
+    branch_name = input;
 
 
     auto_git_initializer;
-    git::Repository repo(fs::current_path().c_str());
-    auto checkout_target = resolve_refish(repo, "master");
+    git::Repository repo(boost::filesystem::current_path().c_str());
 
-    perform_checkout_ref(repo, checkout_target);
+
+    const auto &branches = repo.branches(git::branch_type::ALL);
+    std::vector<std::string> branch_names;
+    branch_names.reserve(branches.size());
+    std::transform(branches.begin(), branches.end(), std::back_inserter(branch_names), [](const auto &branch) {
+        return branch.name();
+    });
+
+    branch_name = "123";
+
+    auto partition_point = std::partition(branch_names.begin(), branch_names.end(), [](const std::string &name) {
+        return name.find("remote") != std::string::npos;
+    });
+    std::vector<std::string> remote_branch_names(branch_names.begin(), partition_point);
+    std::vector<std::string> local_branch_names(partition_point, branch_names.end());
+
+
+    std::cout << "Lokal branches" << std::endl;
+    for (const auto &b: local_branch_names) {
+        std::cout << b << std::endl;
+    }
+
+    std::cout << "Remote branches" << std::endl;
+    for (const auto &b: remote_branch_names) {
+        std::cout << b << std::endl;
+    }
+    auto matching_branch = find_matching_branch(branch_name, local_branch_names);
+    std::cout << "Found: " << matching_branch.value_or("NOTHING") << std::endl;
+
+
+
+
+//    auto checkout_target = resolve_refish(repo, branch_name.c_str());
+//    perform_checkout_ref(repo, checkout_target);
 
 
     return 0;

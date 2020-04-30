@@ -12,11 +12,12 @@ target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/a
 
 set(BUNDLE_LIBGIT2 ON CACHE BOOL "" FORCE)
 add_subdirectory(libgit2cpp)
-target_link_libraries(${PROJECT_NAME} git2cpp)
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libgit2cpp/include)
+target_link_libraries(${PROJECT_NAME} git2cpp)
 
-target_link_libraries(${PROJECT_NAME} stdc++fs)
-
+find_package(Boost REQUIRED COMPONENTS filesystem)
+target_include_directories(${PROJECT_NAME} PRIVATE ${Boost_INCLUDE_DIRS})
+target_link_libraries(${PROJECT_NAME} ${Boost_FILESYSTEM_LIBRARIES})
 
 
 
